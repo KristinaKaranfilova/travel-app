@@ -10,6 +10,7 @@ import org.springframework.web.client.RestClient;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Пребарување градови преку Nominatim (геокодер на OpenStreetMap).
@@ -53,6 +54,43 @@ public class NominatimClient {
                 .retrieve()
                 .body(new ParameterizedTypeReference<List<NominatimResult>>() {});
         return results == null ? List.of() : results;
+    }
+
+    /**
+     * Дополнителни податоци за веќе избран град: Wikidata идентификатор и англиско име.
+     * Се користат за да се најде соодветната Wikivoyage страница (водичот за чет-ботот).
+     * osmType е "node", "way" или "relation" (како што ги враќа /search).
+     */
+    public Optional<Details> details(String osmType, long osmId) {
+        if (osmType == null || osmType.isBlank()) {
+            return Optional.empty();
+        }
+        String id = Character.toUpperCase(osmType.charAt(0)) + String.valueOf(osmId); // на пр. R2097316
+        waitForRateLimit();
+        List<DetailsResult> results = http.get()
+                .uri(uri -> uri.path("/lookup")
+                        .queryParam("osm_ids", id)
+                        .queryParam("format", "jsonv2")
+                        .queryParam("extratags", 1)
+                        .queryParam("namedetails", 1)
+                        .build())
+                .retrieve()
+                .body(new ParameterizedTypeReference<List<DetailsResult>>() {});
+        if (results == null || results.isEmpty()) {
+            return Optional.empty();
+        }
+        DetailsResult r = results.get(0);
+        Map<String, String> tags = r.extratags() == null ? Map.of() : r.extratags();
+        Map<String, String> names = r.namedetails() == null ? Map.of() : r.namedetails();
+        return Optional.of(new Details(tags.get("wikidata"), names.getOrDefault("name:en", names.get("name"))));
+    }
+
+    /** wikidataId може да е null (немаат сите објекти во OSM). */
+    public record Details(String wikidataId, String englishName) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record DetailsResult(Map<String, String> extratags, Map<String, String> namedetails) {
     }
 
     /** Ако претходното барање беше пред помалку од 1 секунда, почекај. */

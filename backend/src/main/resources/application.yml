@@ -39,6 +39,17 @@ spring:
             model: gemini-embedding-001
             dimensions: 768      # должина на векторот (мора да се совпаѓа со pgvector подолу)
 
+    # Повторни обиди кон Gemini (кога е „преоптоварен“ 503 или го надминуваме лимитот 429).
+    # Стандардно Spring AI пробува 10 пати со чекање 2s → 10s → 50s → 250s... без горна граница,
+    # па едно прашање знаеше да „виси“ и по неколку минути. Сега: најмногу 3 обиди за ~3 секунди,
+    # а потоа корисникот веднаш добива јасна порака (и може да проба повторно).
+    retry:
+      max-attempts: 3
+      backoff:
+        initial-interval: 1s
+        multiplier: 2
+        max-interval: 4s
+
     vectorstore:
       pgvector:
         initialize-schema: true  # Spring AI сам ја креира табелата vector_store
@@ -47,6 +58,11 @@ spring:
         index-type: hnsw
 
 app:
+  chat:
+    # При брза привремена грешка (503/429) се прави уште еден обид, со овој модел.
+    # Празно = истиот (главниот) модел. Тестирано: gemini-3.8-flash на бесплатниот план
+    # не почнува да одговара во рок од 20 s (ни со thinkingLevel LOW), па не е корисен како резерва.
+    fallback-model:
   jwt:
     # Таен клуч за потпишување на токените за најава (од secrets.properties)
     secret: ${JWT_SECRET}

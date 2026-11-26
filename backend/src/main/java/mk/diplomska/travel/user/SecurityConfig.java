@@ -1,6 +1,7 @@
 package mk.diplomska.travel.user;
 
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
+import jakarta.servlet.DispatcherType;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -40,6 +41,9 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // Асинхрониот дел од SSE (стримување на одговорот) е продолжение на барање
+                        // што веќе поминало проверка; без ова, крајот на стримот завршува со 403 во логот
+                        .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
                         .requestMatchers("/api/auth/register", "/api/auth/login", "/api/health", "/error").permitAll()
                         .requestMatchers("/api/cities/search", "/api/landmarks", "/api/destinations/featured",
                                 "/api/places/details").permitAll()

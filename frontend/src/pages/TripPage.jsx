@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
-import { getLandmarks, getTrip } from '../api.js'
+import { getGuideStatus, getLandmarks, getTrip } from '../api.js'
 import { useAuth } from '../auth.jsx'
 import ChatPanel, { CHAT_EXAMPLES } from '../components/ChatPanel.jsx'
 import DayCard from '../components/DayCard.jsx'
@@ -9,6 +9,36 @@ import { TripPageSkeleton } from '../components/Skeletons.jsx'
 import TripMap from '../components/TripMap.jsx'
 import { CountUp, Reveal } from '../components/ui.jsx'
 import { CATEGORY_LABELS, dayColor, formatDate } from '../labels.js'
+
+/**
+ * Состојба на туристичкиот водич за чет-ботот. Ако градот го нема, backend-от почнува
+ * да го внесува, а ние прашуваме на секои 3 секунди (додека трае) за да го покажеме напредокот.
+ */
+function useGuideStatus(cityId, enabled) {
+  const [guide, setGuide] = useState(null)
+  useEffect(() => {
+    if (!enabled || cityId == null) return
+    let cancelled = false
+    let timer
+    const poll = async () => {
+      try {
+        const status = await getGuideStatus(cityId)
+        if (cancelled) return
+        setGuide(status)
+        if (status.state === 'PREPARING') timer = setTimeout(poll, 3000)
+        else if (status.state === 'FAILED') timer = setTimeout(poll, 30000)
+      } catch {
+        if (!cancelled) timer = setTimeout(poll, 10000)
+      }
+    }
+    poll()
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [cityId, enabled])
+  return guide
+}
 
 /** Приказ на генериран план: банер горе, водич, денови лево, мапа десно. */
 export default function TripPage() {
@@ -25,6 +55,7 @@ export default function TripPage() {
   const [copied, setCopied] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
   const [chatQuestion, setChatQuestion] = useState(null)
+  const guide = useGuideStatus(trip?.plan.cityId, Boolean(user))
 
   useEffect(() => {
     if (trip?.id === id) return
@@ -114,13 +145,22 @@ export default function TripPage() {
           <span className="script">твојот локален водич</span>
           <h2>Имаш прашање за {plan.cityName}?</h2>
           <p>Прашај за храна, превоз, безбедност или скриени места. Одговорите се од Wikivoyage, со извори.</p>
+          {user && guide?.state === 'PREPARING' && (
+            <p className="guide-status-line">
+              <span className="radar" /> Водичот за {plan.cityName} се подготвува
+              {guide.total ? ` (${Math.round((guide.done / guide.total) * 100)}%)` : '…'}
+            </p>
+          )}
+          {user && (guide?.state === 'UNAVAILABLE' || guide?.state === 'FAILED') && (
+            <p className="guide-status-line muted-light">{guide.message}</p>
+          )}
         </div>
         <div className="guide-actions">
           {user ? (
             <>
               <div className="guide-chips">
                 {CHAT_EXAMPLES.map((q) => (
-                  <button key={q} type="button" className="suggestion" onClick={() => ask(q)}>{q}</button>
+                  <button key={q} type="button" className="suggestion" onClick={() => ask(q)} disabled={guide?.state !== 'READY'}>{q}</button>
                 ))}
               </div>
               <button type="button" className="cta" onClick={() => ask(null)}>✨ Разговарај со водичот</button>
@@ -196,6 +236,7 @@ export default function TripPage() {
           onOpen={() => ask(null)}
           onClose={() => setChatOpen(false)}
           question={chatQuestion}
+          guide={guide}
         />
       )}
     </div>

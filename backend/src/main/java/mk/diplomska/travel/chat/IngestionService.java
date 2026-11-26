@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiConsumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -24,6 +25,8 @@ import java.util.regex.Pattern;
  *  4. За секое парче Gemini пресметува embedding (вектор од 768 броја што го опишува значењето).
  *  5. Парчињата и векторите се зачувуваат во pgvector (табела vector_store),
  *     со metadata: cityId, наслов на делот и линк до изворот.
+ *
+ * Се користи рачно (admin endpoint) и автоматски од {@link GuideService} за градови без водич.
  */
 @Service
 public class IngestionService {
@@ -36,9 +39,11 @@ public class IngestionService {
     /** Мали делови (на пр. празен „Districts“) не носат корисна информација. */
     private static final int MIN_SECTION_CHARS = 100;
 
-    /** Колку парчиња се праќаат на embedding одеднаш (поради лимитот на бесплатниот план). */
+    /** Колку парчиња се праќаат на embedding одеднаш. */
     private static final int BATCH_SIZE = 20;
-    private static final long PAUSE_BETWEEN_BATCHES_MS = 25_000;
+    /** Кога ќе го надминеме лимитот на бесплатниот план (429), чекаме и пробуваме повторно. */
+    private static final long WAIT_AFTER_LIMIT_MS = 20_000;
+    private static final int MAX_WAITS_PER_BATCH = 4;
 
     private final WikivoyageClient wikivoyage;
     private final VectorStore vectorStore;
@@ -52,6 +57,15 @@ public class IngestionService {
 
     /** Враќа колку парчиња се зачувани. Претходните парчиња за градот се бришат. */
     public int ingest(Long cityId, String wikivoyageTitle) {
+        return ingest(cityId, wikivoyageTitle, (done, total) -> { });
+    }
+
+    /**
+     * Како погоре, со известување за напредокот: progress(зачувани, вкупно парчиња).
+     * Ако внесувањето не успее на половина, веќе зачуваните парчиња се бришат,
+     * за градот да не изгледа како да има (нецелосен) водич.
+     */
+    public int ingest(Long cityId, String wikivoyageTitle, BiConsumer<Integer, Integer> progress) {
         City city = cityService.getById(cityId);
         WikivoyageClient.Page page = wikivoyage.fetchPage(wikivoyageTitle);
 
@@ -63,22 +77,41 @@ public class IngestionService {
         List<Document> chunks = splitter.apply(sections); // metadata се копира во секое парче
 
         vectorStore.delete("cityId == " + cityId); // повторно внесување не создава дупликати
-        addInBatches(chunks);                      // тука се повикува Gemini за embeddings
+        progress.accept(0, chunks.size());
+        try {
+            addInBatches(chunks, progress);        // тука се повикува Gemini за embeddings
+        } catch (RuntimeException e) {
+            vectorStore.delete("cityId == " + cityId);
+            throw e;
+        }
 
         log.info("Ingested {} chunks for city id={} from Wikivoyage page '{}'", chunks.size(), city.getId(), page.title());
         return chunks.size();
     }
 
     /**
-     * Бесплатниот Gemini план дозволува ~30.000 токени за embeddings во минута.
-     * 20 парчиња × ~500 токени = ~10.000 токени, па по секоја група паузираме 25 секунди.
+     * Бесплатниот Gemini план дозволува ограничен број токени за embeddings во минута.
+     * Порано се чекаше 25 секунди по секоја група (и кога немаше потреба). Сега групите
+     * одат веднаш една по друга, а само кога Gemini ќе одбие (лимит), се чека и се пробува пак.
      */
-    private void addInBatches(List<Document> chunks) {
+    private void addInBatches(List<Document> chunks, BiConsumer<Integer, Integer> progress) {
         for (int start = 0; start < chunks.size(); start += BATCH_SIZE) {
-            if (start > 0) {
-                sleep(PAUSE_BETWEEN_BATCHES_MS);
+            int end = Math.min(start + BATCH_SIZE, chunks.size());
+            List<Document> batch = chunks.subList(start, end);
+            for (int attempt = 0; ; attempt++) {
+                try {
+                    vectorStore.add(batch);
+                    break;
+                } catch (RuntimeException e) {
+                    if (attempt >= MAX_WAITS_PER_BATCH) {
+                        throw e;
+                    }
+                    log.info("Embedding batch {}-{} refused ({}), waiting {} s", start, end,
+                            GeminiErrors.shortReason(e), WAIT_AFTER_LIMIT_MS / 1000);
+                    sleep(WAIT_AFTER_LIMIT_MS);
+                }
             }
-            vectorStore.add(chunks.subList(start, Math.min(start + BATCH_SIZE, chunks.size())));
+            progress.accept(end, chunks.size());
         }
     }
 
