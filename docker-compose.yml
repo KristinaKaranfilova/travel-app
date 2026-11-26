@@ -1,0 +1,18 @@
+# PostgreSQL 16 со pgvector екстензија.
+# Старт: docker compose up -d
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: travel-db
+    environment:
+      POSTGRES_DB: travel
+      POSTGRES_USER: travel
+      POSTGRES_PASSWORD: travel
+    ports:
+      # 5433 надвор, бидејќи 5432 е зафатена од локално инсталиран PostgreSQL
+      - "5433:5432"
+    volumes:
+      - travel-db-data:/var/lib/postgresql/data
+
+volumes:
+  travel-db-data:

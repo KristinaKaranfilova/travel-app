@@ -1,0 +1,14 @@
+# Профил за евалуација: без веб сервер, само ги пресметува резултатите и излегува.
+spring:
+  main:
+    web-application-type: none
+
+app:
+  warmup:
+    enabled: false   # без загревање на кешот (надворешни повици) за време на евалуацијата
+
+evaluation:
+  # Кои делови да се извршат (види EvaluationRunner)
+  parts: algorithm,rag-retrieval,rag-answers
+  # Релативно на папката backend
+  output-dir: ../evaluation/results

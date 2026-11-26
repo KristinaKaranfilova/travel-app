@@ -1,0 +1,20 @@
+# ---------- Тајни (никогаш на GitHub) ----------
+secrets.properties
+.env
+.env.*
+!.env.example
+
+# ---------- Build и зависности ----------
+node_modules/
+dist/
+target/
+
+# ---------- IDE и систем ----------
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
+
+# ---------- Локални поставки за Claude Code ----------
+.claude/settings.local.json

@@ -1,0 +1,52 @@
+spring:
+  application:
+    name: travel
+
+  # Тајни (API клучеви) се во backend/secrets.properties, кој НЕ се споделува.
+  # Пример: backend/secrets.properties.example
+  config:
+    import: optional:file:./secrets.properties
+
+  # Базата се стартува со docker-compose.yml од главната папка
+  datasource:
+    url: jdbc:postgresql://localhost:5433/travel
+    username: travel
+    password: travel
+
+  jpa:
+    # Шемата ја креира Flyway (db/migration), Hibernate само проверува дека се совпаѓа
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+  web:
+    error:
+      # Пораката од грешката (на пр. „Overpass е преоптоварен“) да стигне до frontend-от
+      include-message: always
+
+  ai:
+    google:
+      genai:
+        api-key: ${GEMINI_API_KEY}
+        chat:
+          # Lite моделот е побрз и поретко „преоптоварен“ (503) на бесплатниот план.
+          # Поквалитетна алтернатива: gemini-3.8-flash
+          model: gemini-3.1-flash-lite
+          temperature: 0.2       # ниска температура = помалку „креативни“ (измислени) одговори
+        embedding:
+          api-key: ${GEMINI_API_KEY}
+          text:
+            model: gemini-embedding-001
+            dimensions: 768      # должина на векторот (мора да се совпаѓа со pgvector подолу)
+
+    vectorstore:
+      pgvector:
+        initialize-schema: true  # Spring AI сам ја креира табелата vector_store
+        dimensions: 768
+        distance-type: cosine-distance
+        index-type: hnsw
+
+app:
+  jwt:
+    # Таен клуч за потпишување на токените за најава (од secrets.properties)
+    secret: ${JWT_SECRET}
